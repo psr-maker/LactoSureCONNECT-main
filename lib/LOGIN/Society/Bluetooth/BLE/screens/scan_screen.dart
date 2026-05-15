@@ -14,6 +14,7 @@ import '../utils/snackbar.dart';
 import '../widgets/system_device_tile.dart';
 import '../widgets/scan_result_tile.dart';
 import '../utils/extra.dart';
+import 'machine_Settings/offser_correction.dart.dart';
 
 class ScanScreen extends StatefulWidget {
   const ScanScreen({Key? key}) : super(key: key);
@@ -89,8 +90,8 @@ class _ScanScreenState extends State<ScanScreen> {
   void onConnectPressed(BluetoothDevice device) {
     device.connectAndUpdateStream().catchError((e) {});
     MaterialPageRoute route = MaterialPageRoute(
-        builder: (context) => DeviceScreen(device: device),
-        settings: RouteSettings(name: '/DeviceScreen'));
+        builder: (context) => OfferCorrection(device: device),
+        settings: RouteSettings(name: '/OfferCorrection'));
     Navigator.of(context).push(route);
   }
 

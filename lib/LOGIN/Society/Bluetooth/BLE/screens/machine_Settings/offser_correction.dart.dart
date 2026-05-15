@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:LactosureConnect/LOGIN/Society/Bluetooth/BLE/screens/machine_Settings/easy_correction.dart';
 import 'package:LactosureConnect/LOGIN/Society/Bluetooth/BLE/screens/machine_Settings/service/models/gethistory.dart';
+import 'package:LactosureConnect/LOGIN/Society/Bluetooth/BLE/utils/extra.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'package:http/http.dart' as http;
@@ -26,13 +27,22 @@ class _MsettingsState extends State<OfferCorrection> {
   bool isReadClicked = false;
   String formattedDate = "";
   final String apiBaseUrl = 'https://lactosure.azurewebsites.net';
+
+  // BT connection tracking
+  BluetoothConnectionState _connectionState = BluetoothConnectionState.disconnected;
+  late StreamSubscription<BluetoothConnectionState> _connectionSub;
 // -------------------- INIT --------------------
   @override
   void initState() {
     super.initState();
     initControllers();
-    Future.delayed(Duration(milliseconds: 500), () {
-      discoverServices();
+    _connectionSub = widget.device.connectionState.listen((state) {
+      if (mounted) {
+        setState(() => _connectionState = state);
+        if (state == BluetoothConnectionState.connected) {
+          discoverServices();
+        }
+      }
     });
   }
 
@@ -83,7 +93,8 @@ class _MsettingsState extends State<OfferCorrection> {
   }
 
   Future<void> discoverServices() async {
-    List<BluetoothService> services = await widget.device.discoverServices();
+    try {
+      List<BluetoothService> services = await widget.device.discoverServices();
 
     BluetoothCharacteristic? write;
     BluetoothCharacteristic? notify;
@@ -116,6 +127,9 @@ class _MsettingsState extends State<OfferCorrection> {
     } else {
       print("❌ Required characteristics not found");
     }
+    } catch (e) {
+      print("❌ discoverServices error: $e");
+    }
   }
 
   Future<void> readChannel() async {
@@ -124,9 +138,11 @@ class _MsettingsState extends State<OfferCorrection> {
       return;
     }
 
+    buffer.clear();
+    final Completer<void> readComplete = Completer();
     late StreamSubscription sub;
 
-    sub = notifyChar!.lastValueStream.listen((data) {
+    sub = notifyChar!.onValueReceived.listen((data) {
       if (data.isEmpty) return;
 
       buffer.addAll(data);
@@ -152,6 +168,7 @@ class _MsettingsState extends State<OfferCorrection> {
 
           updateControllers(result);
           buffer.removeRange(0, frame.length);
+          if (!readComplete.isCompleted) readComplete.complete();
         } catch (e) {
           print("❌ Parse error: $e");
         }
@@ -173,7 +190,12 @@ class _MsettingsState extends State<OfferCorrection> {
           "📤 READ CMD: ${cmd.map((e) => e.toRadixString(16).padLeft(2, '0')).join(' ').toUpperCase()}");
 
       await writeChar!.write(cmd);
-      await Future.delayed(const Duration(seconds: 2));
+      await readComplete.future.timeout(
+        const Duration(seconds: 5),
+        onTimeout: () {
+          print("⏱️ Read timeout - no valid frame received in 5s");
+        },
+      );
 
       print("🔓 LOGOUT...");
       await writeChar!.write(hex("40 04 D1 00 00 95"));
@@ -199,9 +221,10 @@ class _MsettingsState extends State<OfferCorrection> {
     late StreamSubscription sub;
     bool dataReceived = false;
 
+    buffer.clear();
     print("📋 Setting up notification listener...");
 
-    sub = notifyChar!.lastValueStream.listen((data) {
+    sub = notifyChar!.onValueReceived.listen((data) {
       if (data.isEmpty) return;
 
       print("🔔 Notification received: ${data.length} bytes");
@@ -758,6 +781,7 @@ class _MsettingsState extends State<OfferCorrection> {
 
   @override
   void dispose() {
+    _connectionSub.cancel();
     for (var c in controllers.values) {
       c.dispose();
     }
@@ -784,6 +808,27 @@ class _MsettingsState extends State<OfferCorrection> {
             fontSize: 15,
           ),
         ),
+        actions: [
+          _connectionState == BluetoothConnectionState.connected
+              ? IconButton(
+                  icon: const Icon(Icons.bluetooth_connected, color: Colors.white),
+                  tooltip: 'Disconnect',
+                  onPressed: () async {
+                    try {
+                      await widget.device.disconnectAndUpdateStream();
+                    } catch (_) {}
+                  },
+                )
+              : IconButton(
+                  icon: const Icon(Icons.bluetooth_disabled, color: Colors.grey),
+                  tooltip: 'Connect',
+                  onPressed: () async {
+                    try {
+                      await widget.device.connectAndUpdateStream();
+                    } catch (_) {}
+                  },
+                ),
+        ],
       ),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(10),

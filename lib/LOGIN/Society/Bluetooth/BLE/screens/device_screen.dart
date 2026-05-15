@@ -82,34 +82,36 @@ class _DeviceScreenState extends State<DeviceScreen> {
   bool _isConnecting = false;
   bool _isDisconnecting = false;
   bool shouldDisplayServiceTiles = false;
+  List<int> _dataBuffer = []; // accumulates BLE bytes until full message
+  StreamSubscription<List<int>>? _characteristicSubscription; // single listener, re-registered after discovery
   late StreamSubscription<BluetoothConnectionState>
       _connectionStateSubscription;
   late StreamSubscription<bool> _isConnectingSubscription;
   late StreamSubscription<bool> _isDisconnectingSubscription;
   late StreamSubscription<int> _mtuSubscription;
-  StreamController<List<int>> fatstreamer = StreamController<List<int>>();
-  StreamController<List<int>> snfstreamer = StreamController<List<int>>();
-  StreamController<List<int>> clrstreamer = StreamController<List<int>>();
-  StreamController<List<int>> waterstreamer = StreamController<List<int>>();
-  StreamController<List<int>> tempstreamer = StreamController<List<int>>();
-  StreamController<List<int>> proteinstreamer = StreamController<List<int>>();
-  StreamController<List<int>> lactosstreamer = StreamController<List<int>>();
-  StreamController<List<int>> saltstreamer = StreamController<List<int>>();
-  StreamController<List<int>> bonusstreamer = StreamController<List<int>>();
-  StreamController<List<int>> quantitystreamer = StreamController<List<int>>();
-  StreamController<List<int>> ratestreamer = StreamController<List<int>>();
+  StreamController<List<int>> fatstreamer = StreamController<List<int>>.broadcast();
+  StreamController<List<int>> snfstreamer = StreamController<List<int>>.broadcast();
+  StreamController<List<int>> clrstreamer = StreamController<List<int>>.broadcast();
+  StreamController<List<int>> waterstreamer = StreamController<List<int>>.broadcast();
+  StreamController<List<int>> tempstreamer = StreamController<List<int>>.broadcast();
+  StreamController<List<int>> proteinstreamer = StreamController<List<int>>.broadcast();
+  StreamController<List<int>> lactosstreamer = StreamController<List<int>>.broadcast();
+  StreamController<List<int>> saltstreamer = StreamController<List<int>>.broadcast();
+  StreamController<List<int>> bonusstreamer = StreamController<List<int>>.broadcast();
+  StreamController<List<int>> quantitystreamer = StreamController<List<int>>.broadcast();
+  StreamController<List<int>> ratestreamer = StreamController<List<int>>.broadcast();
   StreamController<List<int>> totalamountstreamer =
-      StreamController<List<int>>();
-  StreamController<List<int>> farmeridstreamer = StreamController<List<int>>();
-  StreamController<List<int>> machineidstreamer = StreamController<List<int>>();
-  StreamController<List<int>> otpstreamer = StreamController<List<int>>();
-  StreamController<List<int>> otplengthstreamer = StreamController<List<int>>();
+      StreamController<List<int>>.broadcast();
+  StreamController<List<int>> farmeridstreamer = StreamController<List<int>>.broadcast();
+  StreamController<List<int>> machineidstreamer = StreamController<List<int>>.broadcast();
+  StreamController<List<int>> otpstreamer = StreamController<List<int>>.broadcast();
+  StreamController<List<int>> otplengthstreamer = StreamController<List<int>>.broadcast();
   StreamController<List<int>> passworduserHexstreamer =
-      StreamController<List<int>>();
+      StreamController<List<int>>.broadcast();
   StreamController<List<int>> passwordsuperHexstreamer =
-      StreamController<List<int>>();
+      StreamController<List<int>>.broadcast();
   StreamController<List<int>> passwordwifiHexstreamer =
-      StreamController<List<int>>();
+      StreamController<List<int>>.broadcast();
   String data = '';
   bool isLoading = false;
   String otp = '';
@@ -124,9 +126,15 @@ class _DeviceScreenState extends State<DeviceScreen> {
       _connectionState = state;
       if (state == BluetoothConnectionState.connected) {
         _services = []; // must rediscover services
+        _dataBuffer.clear(); // clear any stale partial data
+        if (_rssi == null) {
+          _rssi = await widget.device.readRssi();
+        }
+        await onRequestMtuPressed();
+        await onDiscoverServicesPressed();
       }
-      if (state == BluetoothConnectionState.connected && _rssi == null) {
-        _rssi = await widget.device.readRssi();
+      if (state == BluetoothConnectionState.disconnected) {
+        _dataBuffer.clear();
       }
       if (mounted) {
         setState(() {});
@@ -153,12 +161,6 @@ class _DeviceScreenState extends State<DeviceScreen> {
       if (mounted) {
         setState(() {});
       }
-    });
-    Future.delayed(Duration(milliseconds: 1000), () {
-      onRequestMtuPressed();
-    });
-    Future.delayed(Duration(milliseconds: 500), () {
-      onDiscoverServicesPressed();
     });
   }
 
@@ -187,6 +189,7 @@ class _DeviceScreenState extends State<DeviceScreen> {
     passworduserHexstreamer.close();
     passwordsuperHexstreamer.close();
     passwordwifiHexstreamer.close();
+    _characteristicSubscription?.cancel();
     super.dispose();
   }
 
@@ -203,12 +206,8 @@ class _DeviceScreenState extends State<DeviceScreen> {
         title: 'Bluetooth Connected',
         compact: true,
       );
-      Future.delayed(Duration(milliseconds: 0), () {
-        onRequestMtuPressed();
-      });
-      Future.delayed(Duration(milliseconds: 0), () {
-        onDiscoverServicesPressed();
-      });
+      // MTU + discoverServices are handled by the connectionState listener;
+      // do NOT call them here to avoid double invocation.
     } catch (e) {
       if (e is FlutterBluePlusException &&
           e.code == FbpErrorCode.connectionCanceled.index) {
@@ -250,6 +249,22 @@ class _DeviceScreenState extends State<DeviceScreen> {
     }
     try {
       _services = await widget.device.discoverServices();
+      // Cancel previous listener and register once on the notify characteristic
+      await _characteristicSubscription?.cancel();
+      _characteristicSubscription = null;
+      _dataBuffer.clear();
+      if (_services.length >= 3) {
+        for (final c in _services[2].characteristics) {
+          if (c.properties.notify) {
+            try { await c.setNotifyValue(true); } catch (_) {}
+            _characteristicSubscription = c.lastValueStream.listen(
+              _onCharacteristicValue,
+              onError: (e) => print('[BLE] stream error: $e'),
+            );
+            break;
+          }
+        }
+      }
     } catch (e) {
       Get.customSnackBar(
         statusType: StatusType.error,
@@ -307,34 +322,58 @@ class _DeviceScreenState extends State<DeviceScreen> {
     }
   }
 
-  CharacteristicTile _buildCharacteristicTile(BluetoothCharacteristic c) {
-    c.lastValueStream.listen((value) {
-      fatstreamer.add(value);
-      snfstreamer.add(value);
-      clrstreamer.add(value);
-      waterstreamer.add(value);
-      tempstreamer.add(value);
-      proteinstreamer.add(value);
-      lactosstreamer.add(value);
-      saltstreamer.add(value);
-      bonusstreamer.add(value);
-      ratestreamer.add(value);
-      totalamountstreamer.add(value);
-      quantitystreamer.add(value);
-      farmeridstreamer.add(value);
-      machineidstreamer.add(value);
-      otpstreamer.add(value);
-      otplengthstreamer.add(value);
-      data = value.toString();
-      passworduserHexstreamer.add(value);
-      passwordsuperHexstreamer.add(value);
-      passwordwifiHexstreamer.add(value);
-      String receivedText = String.fromCharCodes(value);
-      otp = bytesToHex(value);
-      print(receivedText);
-      print(otp);
+  void _onCharacteristicValue(List<int> value) {
+    try {
+      if (value.isEmpty) return;
+
+      // Accumulate bytes; BLE device sends data one byte per notification
+      _dataBuffer.addAll(value);
+      print('[BLE] buf+${value.length}=${_dataBuffer.length}');
+
+      // Only parse when we have a complete message (terminated by \n = 0x0a)
+      if (!_dataBuffer.contains(0x0a)) return;
+
+      // Extract everything up to and including the first \n
+      int nlIndex = _dataBuffer.indexOf(0x0a);
+      List<int> completeMessage = List<int>.from(_dataBuffer.sublist(0, nlIndex + 1));
+      _dataBuffer = _dataBuffer.sublist(nlIndex + 1);
+
+      // Strip trailing \r\n
+      while (completeMessage.isNotEmpty &&
+          (completeMessage.last == 0x0a || completeMessage.last == 0x0d)) {
+        completeMessage.removeLast();
+      }
+      if (completeMessage.isEmpty) return;
+
+      print('[BLE] msg: ${String.fromCharCodes(completeMessage)}');
+      print('[BLE] hex: ${bytesToHex(completeMessage)}');
+      // Notify all stream builders so they rebuild
+      fatstreamer.add(completeMessage);
+      snfstreamer.add(completeMessage);
+      clrstreamer.add(completeMessage);
+      waterstreamer.add(completeMessage);
+      tempstreamer.add(completeMessage);
+      proteinstreamer.add(completeMessage);
+      lactosstreamer.add(completeMessage);
+      saltstreamer.add(completeMessage);
+      bonusstreamer.add(completeMessage);
+      ratestreamer.add(completeMessage);
+      totalamountstreamer.add(completeMessage);
+      quantitystreamer.add(completeMessage);
+      farmeridstreamer.add(completeMessage);
+      machineidstreamer.add(completeMessage);
+      otpstreamer.add(completeMessage);
+      otplengthstreamer.add(completeMessage);
+      data = completeMessage.toString();
+      passworduserHexstreamer.add(completeMessage);
+      passwordsuperHexstreamer.add(completeMessage);
+      passwordwifiHexstreamer.add(completeMessage);
+
+      String receivedText = String.fromCharCodes(completeMessage);
+      otp = bytesToHex(completeMessage);
       receivedotpLength = otp.length;
       receivedTextLength = receivedText.length;
+
       if (receivedotpLength == 20) {
         String PassworduserHex1 = otp.substring(6, 10);
         String PasswordsuperHex1 = otp.substring(10, 14);
@@ -344,15 +383,14 @@ class _DeviceScreenState extends State<DeviceScreen> {
         passworduserHex = PasswordwifiHex2;
         passwordsuperHex = hexToDecimal(PasswordsuperHex1);
         passwordwifiHex = hexToDecimal(PasswordwifiHex1);
-        print('user=$passworduserHex');
-        print('super=$passwordsuperHex');
-        print('wifi=$passwordwifiHex');
       }
+
       List<String> splitData = receivedText.split('|');
       List<String> resultBoxes = List.filled(18, '');
-      for (int i = 0; i < min(splitData.length - 0, 18); i++) {
-        resultBoxes[i] = splitData[i + 0];
+      for (int i = 0; i < min(splitData.length, 18); i++) {
+        resultBoxes[i] = splitData[i];
       }
+      print('[BLE] split(${splitData.length}): ${splitData.asMap().entries.map((e) => "${e.key}=[${e.value}]").join(" ")}');
       finalotp = hexToDecimalAtPosition(otp, 8, 4);
       String fatValue = resultBoxes.isNotEmpty ? resultBoxes[3] : '0%';
       String f = fatValue.replaceAll(RegExp(r'[^0-9.]'), '');
@@ -507,10 +545,13 @@ class _DeviceScreenState extends State<DeviceScreen> {
       int idmac = int.tryParse(idma) ?? 0;
       machineid = idmac.toString();
       channel = resultBoxes.isNotEmpty ? resultBoxes[2] : '';
-      print(intValue);
-    });
-    print(receivedTextLength);
-    print(receivedotpLength);
+      if (mounted) setState(() {});
+    } catch (e) {
+      print('[BLE] parse error: $e');
+    }
+  }
+
+  CharacteristicTile _buildCharacteristicTile(BluetoothCharacteristic c) {
     return CharacteristicTile(
       characteristic: c,
       descriptorTiles:
@@ -1232,7 +1273,7 @@ class _DeviceScreenState extends State<DeviceScreen> {
                               String receivedText =
                                   String.fromCharCodes(snapshot.data!);
                               intValue = 0.0;
-                              intValue = double.parse(fatWithPercentage1);
+                              intValue = double.tryParse(fatWithPercentage1) ?? 0.0;
                               print(fatWithPercentage);
                               print(fatWithPercentage1);
                               print('intvalue=$intValue');
@@ -2574,7 +2615,13 @@ class _DeviceScreenState extends State<DeviceScreen> {
                             child: Row(
                               mainAxisAlignment: MainAxisAlignment.center,
                               children: [
-                                ..._buildServiceTiles(context, widget.device),
+                                Expanded(
+                                  child: Column(
+                                    children: [
+                                      ..._buildServiceTiles(context, widget.device),
+                                    ],
+                                  ),
+                                ),
                               ],
                             ),
                           ),
