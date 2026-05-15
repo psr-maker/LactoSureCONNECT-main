@@ -50,7 +50,7 @@ android {
 
     signingConfigs {
         release {
-            storeFile file('C:/Users/tishn/key/poornasreeMainapp.jks')
+            storeFile file('C:/Users/Poornasree/key/poornasreeMainapp.jks')
             storePassword 'access@404'
             keyAlias 'poornasreeMAin'
             keyPassword 'access@404'
