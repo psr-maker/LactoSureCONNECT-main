@@ -1,0 +1,83 @@
+name: LactosureConnect
+description: A new Flutter project.
+publish_to: "none"
+version: 0.2.1
+
+environment:
+  sdk: ">=2.18.0 <3.0.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+    
+  # State Management
+  csv: ^6.0.0
+  file_picker: ^8.0.3
+  firebase_app_check: ^0.2.2+4
+  firebase_auth: ^4.19.4
+  fl_chart: ^0.67.0
+
+  flutter_animate: ^4.5.0
+  flutter_blue_plus: ^1.32.4
+  flutter_bluetooth_serial: ^0.4.0
+  flutter_form_builder: ^9.2.1
+  flutter_local_notifications: ^17.1.0
+  flutter_screenutil: ^5.9.0
+  flutter_spinkit: ^5.2.1
+  flutter_svg: ^2.0.10+1
+  get: ^4.6.6
+  google_fonts: ^6.2.1
+  google_sign_in: ^6.2.1
+  horizontal_data_table: ^4.3.1
+  http: ^1.2.1
+  intl: ^0.19.0
+  mailer: ^6.1.0
+  open_file: ^3.3.2
+  permission_handler: ^11.3.1
+  progress_dialog_null_safe: ^3.0.0
+  shared_preferences: ^2.2.3
+  url_launcher: ^6.2.6
+  usb_serial: ^0.5.2
+    
+
+  
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^3.0.1
+
+flutter:
+  uses-material-design: true
+
+    
+
+  assets:
+  
+
+    - assets/logo.png
+
+
+   
+    - assets/POONASREE OFFICIAL FULL LOGO PNG.png
+  
+
+    - assets/4.png
+    - assets/5.png
+
+
+    
+
+
+
+
+
+
+
+    - assets/flogo.png
+    
+
+
+
+
+    
+    

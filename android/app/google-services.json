@@ -1,0 +1,48 @@
+{
+  "project_info": {
+    "project_number": "843857105917",
+    "project_id": "poornasree-online",
+    "storage_bucket": "poornasree-online.appspot.com"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:843857105917:android:08da689849a62cac47ff94",
+        "android_client_info": {
+          "package_name": "com.example.pubspec"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBu8srRSJflnL-YeWRy9AxdwAGPLzQxS6U"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:843857105917:android:25ad5d3f8c41981847ff94",
+        "android_client_info": {
+          "package_name": "com.somen.advanced_flutter_firebase"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBu8srRSJflnL-YeWRy9AxdwAGPLzQxS6U"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
