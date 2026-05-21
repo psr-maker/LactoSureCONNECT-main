@@ -2,10 +2,7 @@ import 'dart:ui';
 
 import 'package:LactosureConnect/Constant/core/constants.dart';
 import 'package:LactosureConnect/Constant/core/helper/text_helper.dart';
-import 'package:LactosureConnect/Constant/routes/app_pages.dart';
 import 'package:LactosureConnect/LOGIN/Society/Bluetooth/BLE/screens/scan_screen.dart';
-
-import 'package:LactosureConnect/LOGIN/Society/dashboard/dashboard.dart';
 
 import 'package:LactosureConnect/widgets/background_scaffold.dart';
 import 'package:LactosureConnect/widgets/buttons.dart';

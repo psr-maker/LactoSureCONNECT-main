@@ -29,7 +29,8 @@ class _MsettingsState extends State<OfferCorrection> {
   final String apiBaseUrl = 'https://lactosure.azurewebsites.net';
 
   // BT connection tracking
-  BluetoothConnectionState _connectionState = BluetoothConnectionState.disconnected;
+  BluetoothConnectionState _connectionState =
+      BluetoothConnectionState.disconnected;
   late StreamSubscription<BluetoothConnectionState> _connectionSub;
 // -------------------- INIT --------------------
   @override
@@ -96,37 +97,41 @@ class _MsettingsState extends State<OfferCorrection> {
     try {
       List<BluetoothService> services = await widget.device.discoverServices();
 
-    BluetoothCharacteristic? write;
-    BluetoothCharacteristic? notify;
+      BluetoothCharacteristic? write;
+      BluetoothCharacteristic? notify;
 
-    for (var service in services) {
-      for (var char in service.characteristics) {
-        print("CHAR: ${char.uuid}");
-        print("  write: ${char.properties.write}");
-        print("  writeNoResp: ${char.properties.writeWithoutResponse}");
-        print("  notify: ${char.properties.notify}");
+      for (var service in services) {
+        for (var char in service.characteristics) {
+          print("CHAR: ${char.uuid}");
+          print("  write: ${char.properties.write}");
+          print("  writeNoResp: ${char.properties.writeWithoutResponse}");
+          print("  notify: ${char.properties.notify}");
 
-        if (char.properties.write || char.properties.writeWithoutResponse) {
-          write = char;
-        }
+          if (char.properties.write || char.properties.writeWithoutResponse) {
+            write = char;
+          }
 
-        if (char.properties.notify) {
-          notify = char;
+          if (char.properties.notify) {
+            notify = char;
+          }
         }
       }
-    }
 
-    if (write != null && notify != null) {
-      writeChar = write;
-      notifyChar = notify;
+      if (write != null && notify != null) {
+        writeChar = write;
+        notifyChar = notify;
 
-      await notifyChar!.setNotifyValue(true);
+        if (!(await notifyChar!.isNotifying)) {
+          await notifyChar!.setNotifyValue(true);
+        }
 
-      print("✅ WRITE CHAR: ${write.uuid}");
-      print("✅ NOTIFY CHAR: ${notify.uuid}");
-    } else {
-      print("❌ Required characteristics not found");
-    }
+        await Future.delayed(const Duration(seconds: 1));
+
+        print("✅ WRITE CHAR: ${write.uuid}");
+        print("✅ NOTIFY CHAR: ${notify.uuid}");
+      } else {
+        print("❌ Required characteristics not found");
+      }
     } catch (e) {
       print("❌ discoverServices error: $e");
     }
@@ -141,8 +146,9 @@ class _MsettingsState extends State<OfferCorrection> {
     buffer.clear();
     final Completer<void> readComplete = Completer();
     late StreamSubscription sub;
+    bool dataReceived = false;
 
-    sub = notifyChar!.onValueReceived.listen((data) {
+    sub = notifyChar!.lastValueStream.listen((data) {
       if (data.isEmpty) return;
 
       buffer.addAll(data);
@@ -154,8 +160,12 @@ class _MsettingsState extends State<OfferCorrection> {
             "📦 FRAME RECEIVED: ${frame.map((e) => e.toRadixString(16).padLeft(2, '0')).join(' ').toUpperCase()}");
 
         if (frame[1] != 0x0E || frame[2] != 0xA1) {
-          print("❌ Invalid response (not memory response)");
-          buffer.clear();
+          print("❌ Invalid response");
+
+          if (buffer.isNotEmpty) {
+            buffer.removeAt(0);
+          }
+
           return;
         }
 
@@ -168,17 +178,23 @@ class _MsettingsState extends State<OfferCorrection> {
 
           updateControllers(result);
           buffer.removeRange(0, frame.length);
+          dataReceived = true;
           if (!readComplete.isCompleted) readComplete.complete();
         } catch (e) {
           print("❌ Parse error: $e");
         }
+      }
+    }, onError: (error) {
+      print("❌ Stream error: $error");
+      if (!readComplete.isCompleted) {
+        readComplete.completeError(error);
       }
     });
 
     try {
       print("🔐 LOGIN...");
       await writeChar!.write(hex("40 04 06 00 00 42"));
-      await Future.delayed(const Duration(seconds: 1));
+      await Future.delayed(const Duration(milliseconds: 500));
 
       buffer.clear();
 
@@ -188,14 +204,23 @@ class _MsettingsState extends State<OfferCorrection> {
 
       print(
           "📤 READ CMD: ${cmd.map((e) => e.toRadixString(16).padLeft(2, '0')).join(' ').toUpperCase()}");
+      await Future.delayed(const Duration(milliseconds: 300));
 
-      await writeChar!.write(cmd);
-      await readComplete.future.timeout(
-        const Duration(seconds: 5),
-        onTimeout: () {
-          print("⏱️ Read timeout - no valid frame received in 5s");
-        },
+      await writeChar!.write(
+        cmd,
+        withoutResponse: false,
       );
+
+      try {
+        await readComplete.future.timeout(
+          const Duration(seconds: 8),
+        );
+      } on TimeoutException {
+        print("⏱️ Read timeout - no valid frame received in 5s");
+        if (!dataReceived) {
+          print("❌ No data received on first read attempt");
+        }
+      }
 
       print("🔓 LOGOUT...");
       await writeChar!.write(hex("40 04 D1 00 00 95"));
@@ -224,7 +249,7 @@ class _MsettingsState extends State<OfferCorrection> {
     buffer.clear();
     print("📋 Setting up notification listener...");
 
-    sub = notifyChar!.onValueReceived.listen((data) {
+    sub = notifyChar!.lastValueStream.listen((data) {
       if (data.isEmpty) return;
 
       print("🔔 Notification received: ${data.length} bytes");
@@ -279,20 +304,25 @@ class _MsettingsState extends State<OfferCorrection> {
       print("📖 Reading current values from channel ${channelIndex + 1}...");
       List<int> cmd = buildReadCommand(channelIndex);
 
-      await Future.delayed(const Duration(milliseconds: 200));
-
       print("📤 Sending read command...");
-      await writeChar!.write(cmd);
-      await readComplete.future.timeout(
-        const Duration(seconds: 5),
-        onTimeout: () {
-          print("⏱️  Read timeout after 5 seconds");
-          if (!dataReceived) {
-            print("❌ No data received - device may not have responded");
-            print("   Retrying with last known values...");
-          }
-        },
+      await Future.delayed(const Duration(milliseconds: 300));
+
+      await writeChar!.write(
+        cmd,
+        withoutResponse: false,
       );
+
+      try {
+        await readComplete.future.timeout(
+          const Duration(seconds: 8),
+        );
+      } on TimeoutException {
+        print("⏱️ Read timeout after 5 seconds");
+        if (!dataReceived) {
+          print("❌ No data received - device may not have responded");
+          print("   Retrying with last known values...");
+        }
+      }
 
       await Future.delayed(const Duration(milliseconds: 500));
     } catch (e) {
@@ -329,12 +359,28 @@ class _MsettingsState extends State<OfferCorrection> {
   }
 
   List<int>? extractFrame(List<int> buffer) {
+    if (buffer.isEmpty) return null;
+
     int start = buffer.indexOf(0x40);
-    if (start == -1) return null;
 
-    if (buffer.length < start + 17) return null;
+    if (start == -1) {
+      buffer.clear();
+      return null;
+    }
 
-    return buffer.sublist(start, start + 17);
+    // Remove garbage before frame
+    if (start > 0) {
+      buffer.removeRange(0, start);
+    }
+
+    // Wait full frame
+    if (buffer.length < 17) {
+      return null;
+    }
+
+    List<int> frame = buffer.sublist(0, 17);
+
+    return frame;
   }
 
   Map<String, double> parseData(List<int> frame) {
@@ -811,7 +857,8 @@ class _MsettingsState extends State<OfferCorrection> {
         actions: [
           _connectionState == BluetoothConnectionState.connected
               ? IconButton(
-                  icon: const Icon(Icons.bluetooth_connected, color: Colors.white),
+                  icon: const Icon(Icons.bluetooth_connected,
+                      color: Colors.white),
                   tooltip: 'Disconnect',
                   onPressed: () async {
                     try {
@@ -820,7 +867,8 @@ class _MsettingsState extends State<OfferCorrection> {
                   },
                 )
               : IconButton(
-                  icon: const Icon(Icons.bluetooth_disabled, color: Colors.grey),
+                  icon:
+                      const Icon(Icons.bluetooth_disabled, color: Colors.grey),
                   tooltip: 'Connect',
                   onPressed: () async {
                     try {
@@ -927,7 +975,6 @@ class _MsettingsState extends State<OfferCorrection> {
               const SizedBox(height: 25),
               Center(child: _submitButton()),
             ] else ...[
-
               Easycorrection(
                 device: widget.device,
               )
@@ -1097,9 +1144,13 @@ class _MsettingsState extends State<OfferCorrection> {
                       print(
                           "\n📝 STEP 2: Building write command with updated values...");
                       List<int> cmd = buildWriteCommand(channelIndex);
+                      await Future.delayed(const Duration(milliseconds: 300));
 
                       print("\n✉️  STEP 3: Sending write command to device...");
-                      await writeChar!.write(cmd);
+                      await writeChar!.write(
+                        cmd,
+                        withoutResponse: false,
+                      );
                       await Future.delayed(const Duration(seconds: 2));
 
                       print("\n🔓 LOGOUT...");

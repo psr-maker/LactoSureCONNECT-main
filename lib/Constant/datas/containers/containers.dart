@@ -9,7 +9,6 @@ import 'package:LactosureConnect/widgets/buttons.dart';
 import 'package:LactosureConnect/widgets/custom_text_field.dart';
 
 import 'package:flutter/material.dart';
-import 'package:flutter_animate/flutter_animate.dart';
 import 'package:get/get_core/src/get_main.dart';
 
 import 'package:provider/provider.dart';

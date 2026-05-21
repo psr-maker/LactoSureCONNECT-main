@@ -1,5 +1,3 @@
-import 'dart:convert';
-
 import 'package:LactosureConnect/Constant/core/constants.dart';
 import 'package:LactosureConnect/Constant/core/extensions/custom_dialog_extension.dart';
 import 'package:LactosureConnect/Constant/core/extensions/getx_custom_snackbar.dart';
@@ -7,8 +5,6 @@ import 'package:LactosureConnect/Constant/core/helper/text_helper.dart';
 import 'package:LactosureConnect/Constant/core/services/app_services.dart';
 
 import 'package:LactosureConnect/Constant/screens/welcome_screen/welcome_screen_choose.dart';
-import 'package:flutter_local_notifications/flutter_local_notifications.dart';
-import 'package:http/http.dart' as http;
 
 import 'package:LactosureConnect/widgets/background_scaffold.dart';
 import 'package:LactosureConnect/widgets/buttons.dart';
