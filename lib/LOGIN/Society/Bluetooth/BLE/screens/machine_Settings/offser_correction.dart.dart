@@ -143,45 +143,63 @@ class _MsettingsState extends State<OfferCorrection> {
       return;
     }
 
+    print("\n🔔 Ensuring notifications are enabled...");
+    if (!(await notifyChar!.isNotifying)) {
+      await notifyChar!.setNotifyValue(true);
+      print("✅ Notifications enabled");
+    }
+
     buffer.clear();
     final Completer<void> readComplete = Completer();
     late StreamSubscription sub;
     bool dataReceived = false;
+    int totalDataReceived = 0;
 
-    sub = notifyChar!.lastValueStream.listen((data) {
+    sub = notifyChar!.onValueReceived.listen((data) {
       if (data.isEmpty) return;
+
+      totalDataReceived += data.length;
+      print(
+          "🔔 DATA RECEIVED: ${data.length} bytes (total: $totalDataReceived) - ${data.map((e) => e.toRadixString(16).padLeft(2, '0')).join(' ').toUpperCase()}");
 
       buffer.addAll(data);
 
-      final frame = extractFrame(buffer);
+      // Keep searching for valid READ response frame (0x40 0x0E 0xA1...)
+      while (buffer.isNotEmpty) {
+        final frame = extractFrame(buffer);
 
-      if (frame != null) {
-        print(
-            "📦 FRAME RECEIVED: ${frame.map((e) => e.toRadixString(16).padLeft(2, '0')).join(' ').toUpperCase()}");
+        if (frame != null) {
+          print(
+              "📦 FRAME EXTRACTED: ${frame.map((e) => e.toRadixString(16).padLeft(2, '0')).join(' ').toUpperCase()}");
 
-        if (frame[1] != 0x0E || frame[2] != 0xA1) {
-          print("❌ Invalid response");
+          // Check if this is a valid READ response
+          if (frame[1] == 0x0E && frame[2] == 0xA1) {
+            try {
+              final result = parseData(frame);
+              print("✅ PARSED VALUES:");
+              result.forEach((key, value) {
+                print("   $key: $value");
+              });
 
-          if (buffer.isNotEmpty) {
-            buffer.removeAt(0);
+              updateControllers(result);
+              buffer.removeRange(0, frame.length);
+              dataReceived = true;
+              if (!readComplete.isCompleted) readComplete.complete();
+              break; // Exit loop after successful parse
+            } catch (e) {
+              print("❌ Parse error: $e");
+              buffer.removeRange(0, frame.length);
+            }
+          } else {
+            // Invalid frame type - skip this frame and search for next
+            print(
+                "⏩ Skipping frame with type [${frame[1].toRadixString(16).padLeft(2, '0')} ${frame[2].toRadixString(16).padLeft(2, '0')}], looking for [0E A1]");
+            buffer.removeRange(0, frame.length);
+            // Continue loop to check if next frame is valid
           }
-
-          return;
-        }
-
-        try {
-          final result = parseData(frame);
-          print("✅ PARSED VALUES:");
-          result.forEach((key, value) {
-            print("   $key: $value");
-          });
-
-          updateControllers(result);
-          buffer.removeRange(0, frame.length);
-          dataReceived = true;
-          if (!readComplete.isCompleted) readComplete.complete();
-        } catch (e) {
-          print("❌ Parse error: $e");
+        } else {
+          // Frame not complete yet
+          break;
         }
       }
     }, onError: (error) {
@@ -194,9 +212,11 @@ class _MsettingsState extends State<OfferCorrection> {
     try {
       print("🔐 LOGIN...");
       await writeChar!.write(hex("40 04 06 00 00 42"));
-      await Future.delayed(const Duration(milliseconds: 500));
-
-      buffer.clear();
+      
+      // Wait for device to fully process LOGIN command
+      // Device sends 17-byte LOGIN response, so we wait longer
+      print("⏳ Waiting for device to process LOGIN (2 seconds)...");
+      await Future.delayed(const Duration(seconds: 2));
 
       print("📖 Requesting values from channel ${selectedChannel}...");
       int channelIndex = int.parse(selectedChannel) - 1;
@@ -204,8 +224,8 @@ class _MsettingsState extends State<OfferCorrection> {
 
       print(
           "📤 READ CMD: ${cmd.map((e) => e.toRadixString(16).padLeft(2, '0')).join(' ').toUpperCase()}");
-      await Future.delayed(const Duration(milliseconds: 300));
 
+      print("✉️ Sending read command...");
       await writeChar!.write(
         cmd,
         withoutResponse: false,
@@ -216,9 +236,10 @@ class _MsettingsState extends State<OfferCorrection> {
           const Duration(seconds: 8),
         );
       } on TimeoutException {
-        print("⏱️ Read timeout - no valid frame received in 5s");
+        print("⏱️ Read timeout after 8 seconds");
         if (!dataReceived) {
-          print("❌ No data received on first read attempt");
+          print(
+              "❌ No data received on first read attempt (total bytes received: $totalDataReceived)");
         }
       }
 
@@ -242,54 +263,72 @@ class _MsettingsState extends State<OfferCorrection> {
       return;
     }
 
+    print("\n🔔 Ensuring notifications are enabled...");
+    if (!(await notifyChar!.isNotifying)) {
+      await notifyChar!.setNotifyValue(true);
+      print("✅ Notifications enabled");
+    }
+
     Completer<void> readComplete = Completer();
     late StreamSubscription sub;
     bool dataReceived = false;
+    int totalDataReceived = 0;
 
     buffer.clear();
     print("📋 Setting up notification listener...");
 
-    sub = notifyChar!.lastValueStream.listen((data) {
+    sub = notifyChar!.onValueReceived.listen((data) {
       if (data.isEmpty) return;
 
-      print("🔔 Notification received: ${data.length} bytes");
+      totalDataReceived += data.length;
+      print(
+          "🔔 Notification received: ${data.length} bytes (total: $totalDataReceived)");
       print(
           "   Data: ${data.map((e) => e.toRadixString(16).padLeft(2, '0')).join(' ').toUpperCase()}");
 
       buffer.addAll(data);
       print("   Buffer size: ${buffer.length}");
 
-      final frame = extractFrame(buffer);
+      // Keep searching for valid READ response frame (0x40 0x0E 0xA1...)
+      while (buffer.isNotEmpty) {
+        final frame = extractFrame(buffer);
 
-      if (frame != null) {
-        print(
-            "📦 FRAME EXTRACTED: ${frame.map((e) => e.toRadixString(16).padLeft(2, '0')).join(' ').toUpperCase()}");
+        if (frame != null) {
+          print(
+              "📦 FRAME EXTRACTED: ${frame.map((e) => e.toRadixString(16).padLeft(2, '0')).join(' ').toUpperCase()}");
 
-        if (frame[1] != 0x0E || frame[2] != 0xA1) {
-          print("❌ Invalid response (type mismatch)");
-          buffer.clear();
-          return;
-        }
+          // Check if this is a valid READ response
+          if (frame[1] == 0x0E && frame[2] == 0xA1) {
+            try {
+              final result = parseData(frame);
+              print("✅ OLD VALUES RETRIEVED:");
+              result.forEach((key, value) {
+                print("   $key: $value");
+              });
 
-        try {
-          final result = parseData(frame);
-          print("✅ OLD VALUES RETRIEVED:");
-          result.forEach((key, value) {
-            print("   $key: $value");
-          });
+              lastReadValues = result;
+              dataReceived = true;
+              buffer.removeRange(0, frame.length);
 
-          lastReadValues = result;
-          dataReceived = true;
-          buffer.removeRange(0, frame.length);
-
-          if (!readComplete.isCompleted) {
-            readComplete.complete();
+              if (!readComplete.isCompleted) {
+                readComplete.complete();
+              }
+              break; // Exit loop after successful parse
+            } catch (e) {
+              print("❌ Parse error: $e");
+              buffer.removeRange(0, frame.length);
+            }
+          } else {
+            // Invalid frame type - skip this frame and search for next
+            print(
+                "⏩ Skipping frame with type [${frame[1].toRadixString(16).padLeft(2, '0')} ${frame[2].toRadixString(16).padLeft(2, '0')}], looking for [0E A1]");
+            buffer.removeRange(0, frame.length);
+            // Continue loop to check if next frame is valid
           }
-        } catch (e) {
-          print("❌ Parse error: $e");
+        } else {
+          // Frame not complete yet
+          break;
         }
-      } else {
-        print("⏳ Frame not complete yet, waiting for more data...");
       }
     }, onError: (error) {
       print("❌ Stream error: $error");
@@ -299,12 +338,12 @@ class _MsettingsState extends State<OfferCorrection> {
     });
 
     try {
-      buffer.clear();
-
       print("📖 Reading current values from channel ${channelIndex + 1}...");
       List<int> cmd = buildReadCommand(channelIndex);
 
       print("📤 Sending read command...");
+      print(
+          "   Command: ${cmd.map((e) => e.toRadixString(16).padLeft(2, '0')).join(' ').toUpperCase()}");
       await Future.delayed(const Duration(milliseconds: 300));
 
       await writeChar!.write(
@@ -317,9 +356,10 @@ class _MsettingsState extends State<OfferCorrection> {
           const Duration(seconds: 8),
         );
       } on TimeoutException {
-        print("⏱️ Read timeout after 5 seconds");
+        print("⏱️ Read timeout after 8 seconds");
         if (!dataReceived) {
-          print("❌ No data received - device may not have responded");
+          print(
+              "❌ No data received - device may not have responded (total bytes: $totalDataReceived)");
           print("   Retrying with last known values...");
         }
       }
